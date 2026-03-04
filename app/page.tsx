@@ -45,7 +45,7 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [imgProgress, setImgProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [buildingPpt, setBuildingPpt] = useState(false);
-  const [done, setDone] = useState<{ imagesLoaded: number; imagesTotal: number } | null>(null);
+  const [done, setDone] = useState<{ imagesLoaded: number; imagesTotal: number; httpErrors: number; exceptions: number; firstError: string; proxyUsed: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -121,7 +121,14 @@ export default function Home() {
       a.download = 'FairPrice_VisualMerch.pptx';
       a.click();
       URL.revokeObjectURL(url);
-      setDone({ imagesLoaded: result.imagesLoaded, imagesTotal: result.imagesTotal });
+      setDone({
+        imagesLoaded: result.imagesLoaded,
+        imagesTotal: result.imagesTotal,
+        httpErrors: result.httpErrors,
+        exceptions: result.exceptions,
+        firstError: result.firstError,
+        proxyUsed: result.proxyUsed,
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate presentation');
     } finally {
@@ -344,10 +351,22 @@ export default function Home() {
                   Check your Downloads folder for <strong>FairPrice_VisualMerch.pptx</strong>
                 </div>
                 {done.imagesTotal > 0 && (
-                  <div style={{ fontSize: '0.82rem', color: done.imagesLoaded === done.imagesTotal ? '#5e9a18' : '#b45309', marginBottom: '1rem' }}>
-                    {done.imagesLoaded === done.imagesTotal
-                      ? `All ${done.imagesTotal} images embedded successfully.`
-                      : `${done.imagesLoaded} of ${done.imagesTotal} images embedded (${done.imagesTotal - done.imagesLoaded} unavailable).`}
+                  <div style={{ marginBottom: '1rem', fontSize: '0.82rem' }}>
+                    {done.imagesLoaded === done.imagesTotal ? (
+                      <div style={{ color: '#5e9a18' }}>All {done.imagesTotal} images embedded successfully.</div>
+                    ) : (
+                      <div>
+                        <div style={{ color: '#b45309', marginBottom: '0.35rem' }}>
+                          {done.imagesLoaded} of {done.imagesTotal} images embedded.
+                        </div>
+                        <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 6, padding: '0.5rem 0.75rem', color: '#92400e', textAlign: 'left', lineHeight: 1.5 }}>
+                          <div><strong>Proxy used:</strong> <code style={{ fontSize: '0.75rem' }}>{done.proxyUsed}</code></div>
+                          {done.httpErrors > 0 && <div><strong>HTTP errors:</strong> {done.httpErrors} (proxy reached Perigee but got blocked — try a different proxy)</div>}
+                          {done.exceptions > 0 && <div><strong>Network errors:</strong> {done.exceptions} (proxy unreachable or CORS error)</div>}
+                          {done.firstError && <div><strong>First error:</strong> {done.firstError}</div>}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <button onClick={reset} style={{ background: 'transparent', border: '1.5px solid #76bd22', color: '#5e9a18', borderRadius: 6, padding: '0.4rem 1rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' }}>

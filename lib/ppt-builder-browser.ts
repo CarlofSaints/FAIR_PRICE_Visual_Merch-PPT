@@ -112,28 +112,43 @@ function compressViaCanvas(b64: string, mime: string): Promise<string> {
   });
 }
 
-async function fetchImageCompressed(url: string): Promise<{ b64: string; mime: string } | null> {
+type FetchOutcome =
+  | { ok: true; b64: string; mime: string }
+  | { ok: false; reason: 'http'; status: number }
+  | { ok: false; reason: 'exception'; msg: string };
+
+async function fetchImageDiag(url: string): Promise<FetchOutcome> {
   const proxyUrl = `${_proxyBase}?url=${encodeURIComponent(url)}`;
   try {
     const res = await fetch(proxyUrl);
-    if (!res.ok) return null;
+    if (!res.ok) return { ok: false, reason: 'http', status: res.status };
     const blob = await res.blob();
     const mime = blob.type || 'image/jpeg';
     const rawB64 = await blobToBase64(blob);
     const compressed = await compressViaCanvas(rawB64, mime);
-    return { b64: compressed, mime: 'image/jpeg' };
-  } catch {
-    return null;
+    return { ok: true, b64: compressed, mime: 'image/jpeg' };
+  } catch (e) {
+    return { ok: false, reason: 'exception', msg: String(e) };
   }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+export interface BuildResult {
+  blob: Blob;
+  imagesLoaded: number;
+  imagesTotal: number;
+  httpErrors: number;   // proxy reachable but upstream returned non-2xx
+  exceptions: number;  // fetch threw entirely (network error, CORS, bad URL)
+  firstError: string;  // first error message for display
+  proxyUsed: string;   // which proxy base was used
+}
+
 export async function buildPptxBrowser(
   data: ParsedDataJSON,
   summaries: UserSummary[],
   onProgress: ProgressCallback,
-): Promise<{ blob: Blob; imagesLoaded: number; imagesTotal: number }> {
+): Promise<BuildResult> {
   // Load logos from same-origin public folder (no CORS)
   const [fpB64, pgB64] = await Promise.all([
     fetchAsBase64('/fairprice-logo.png'),
@@ -149,14 +164,25 @@ export async function buildPptxBrowser(
   }
   const urlList = [...allUrls];
   const imageCache = new Map<string, { b64: string; mime: string }>();
+  let httpErrors = 0;
+  let exceptions = 0;
+  let firstError = '';
 
   // Fetch + compress images with progress
   let loaded = 0;
   onProgress(0, urlList.length);
   await Promise.allSettled(
     urlList.map(async url => {
-      const result = await fetchImageCompressed(url);
-      if (result) imageCache.set(url, result);
+      const outcome = await fetchImageDiag(url);
+      if (outcome.ok) {
+        imageCache.set(url, { b64: outcome.b64, mime: outcome.mime });
+      } else if (outcome.reason === 'http') {
+        httpErrors++;
+        if (!firstError) firstError = `HTTP ${outcome.status} from proxy`;
+      } else {
+        exceptions++;
+        if (!firstError) firstError = outcome.msg;
+      }
       loaded++;
       onProgress(loaded, urlList.length);
     }),
@@ -390,5 +416,9 @@ export async function buildPptxBrowser(
     blob: result as Blob,
     imagesLoaded: imageCache.size,
     imagesTotal: urlList.length,
+    httpErrors,
+    exceptions,
+    firstError,
+    proxyUsed: _proxyBase,
   };
 }
