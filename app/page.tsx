@@ -1,65 +1,332 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useRef, useCallback } from 'react';
+import Image from 'next/image';
+
+interface PreviewStats {
+  totalRows: number;
+  uniqueUsers: number;
+  uniqueStores: number;
+  uniqueDays: string[];
+  dateRange: { from: string; to: string };
+}
 
 export default function Home() {
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [preview, setPreview] = useState<PreviewStats | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = useCallback(async (f: File) => {
+    if (!f.name.endsWith('.xlsx') && !f.name.endsWith('.xls')) {
+      setError('Please upload an Excel file (.xlsx or .xls)');
+      return;
+    }
+    setFile(f);
+    setPreview(null);
+    setError(null);
+    setDone(false);
+    setParsing(true);
+
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch('/api/parse', { method: 'POST', body: fd });
+      if (!res.ok) throw new Error((await res.json()).error || 'Parse failed');
+      const data = await res.json();
+      setPreview(data);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to read file');
+      setFile(null);
+    } finally {
+      setParsing(false);
+    }
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  }, [handleFile]);
+
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f);
+  };
+
+  const handleGenerate = async () => {
+    if (!file || !preview) return;
+    setGenerating(true);
+    setError(null);
+    setDone(false);
+
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/generate', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || 'Generation failed');
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'FairPrice_VisualMerch.pptx';
+      a.click();
+      URL.revokeObjectURL(url);
+      setDone(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to generate presentation');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const reset = () => {
+    setFile(null);
+    setPreview(null);
+    setError(null);
+    setDone(false);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
+    <div style={{ minHeight: '100vh', background: '#F6F6F6' }}>
+      {/* ── Header ── */}
+      <header style={{
+        background: '#76bd22',
+        padding: '0 2rem',
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <Image
+            src="/fairprice-logo.png"
+            alt="Fair Price"
+            width={120}
+            height={52}
+            style={{ objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
+          />
+          <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.4)' }} />
+          <span style={{ color: '#fff', fontWeight: 700, fontSize: '1.05rem', letterSpacing: '0.02em' }}>
+            PPT Builder
+          </span>
+        </div>
         <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+          src="/perigee-logo.png"
+          alt="Perigee"
+          width={44}
+          height={44}
+          style={{ objectFit: 'contain' }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      </header>
+
+      <main style={{ maxWidth: '680px', margin: '0 auto', padding: '2.5rem 1rem' }}>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#242424', marginBottom: '0.25rem' }}>
+          Visual Merch Presentation Generator
+        </h1>
+        <p style={{ color: '#6b7280', marginBottom: '2rem', fontSize: '0.95rem' }}>
+          Upload your Perigee survey export and download a branded PowerPoint in seconds.
+        </p>
+
+        {/* Error banner */}
+        {error && (
+          <div style={{
+            background: '#FEE2E2', border: '1px solid #FF4539', borderRadius: 8,
+            padding: '0.75rem 1rem', marginBottom: '1.5rem', color: '#b91c1c',
+            fontSize: '0.9rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}>
+            <span>{error}</span>
+            <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#b91c1c', fontWeight: 700, fontSize: '1rem' }}>✕</button>
+          </div>
+        )}
+
+        {/* ── Step 1: Upload ── */}
+        <div style={card}>
+          <StepLabel n={1} label="Upload Survey Excel" />
+
+          <div
+            onClick={() => inputRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            style={{
+              border: `2px dashed ${dragging || file ? '#76bd22' : '#d1d5db'}`,
+              borderRadius: 10,
+              padding: '2rem',
+              textAlign: 'center',
+              cursor: 'pointer',
+              background: dragging || file ? '#f0fce4' : '#fafafa',
+              transition: 'all 0.2s',
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            {parsing ? (
+              <div style={{ color: '#76bd22', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <Spinner color="#76bd22" /> Reading file…
+              </div>
+            ) : file ? (
+              <div>
+                <div style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>✅</div>
+                <div style={{ fontWeight: 600, color: '#242424' }}>{file.name}</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.2rem' }}>
+                  {(file.size / 1024).toFixed(0)} KB · Click to change
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div style={{ fontSize: '2.25rem', marginBottom: '0.5rem' }}>📊</div>
+                <div style={{ fontWeight: 600, color: '#242424' }}>Drop your Excel file here</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem' }}>or click to browse · .xlsx files only</div>
+              </div>
+            )}
+          </div>
+          <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={onInputChange} />
         </div>
+
+        {/* ── Step 2: Preview ── */}
+        {preview && (
+          <div style={card}>
+            <StepLabel n={2} label="Preview" />
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
+              <StatCard label="Total Surveys" value={preview.totalRows} />
+              <StatCard label="Unique Users" value={preview.uniqueUsers} />
+              <StatCard label="Unique Stores" value={preview.uniqueStores} />
+            </div>
+
+            {(preview.dateRange.from || preview.dateRange.to) && (
+              <div style={{ background: '#F6F6F6', borderRadius: 8, padding: '0.6rem 1rem', fontSize: '0.9rem', color: '#242424', marginBottom: '0.5rem' }}>
+                <span style={{ color: '#6b7280' }}>Date range: </span>
+                <strong>
+                  {preview.dateRange.from === preview.dateRange.to || !preview.dateRange.to
+                    ? preview.dateRange.from
+                    : `${preview.dateRange.from} – ${preview.dateRange.to}`}
+                </strong>
+              </div>
+            )}
+
+            {preview.uniqueDays.length > 0 && (
+              <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
+                Days surveyed: {preview.uniqueDays.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Step 3: Generate ── */}
+        {preview && (
+          <div style={card}>
+            <StepLabel n={3} label="Generate Presentation" />
+
+            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+              This will fetch survey images from Perigee and build a fully branded PowerPoint.
+              Large files may take up to a minute.
+            </p>
+
+            {done ? (
+              <div style={{
+                background: '#f0fce4', border: '1px solid #76bd22', borderRadius: 8,
+                padding: '1.25rem', textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>🎉</div>
+                <div style={{ fontWeight: 700, color: '#242424', marginBottom: '0.35rem' }}>Presentation downloaded!</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                  Check your Downloads folder for <strong>FairPrice_VisualMerch.pptx</strong>
+                </div>
+                <button
+                  onClick={reset}
+                  style={{ background: 'transparent', border: '1.5px solid #76bd22', color: '#5e9a18', borderRadius: 6, padding: '0.4rem 1rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' }}
+                >
+                  Build another
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                style={{
+                  width: '100%',
+                  background: generating ? '#a8d97b' : '#76bd22',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '0.9rem 1.5rem',
+                  fontSize: '1rem',
+                  fontWeight: 700,
+                  cursor: generating ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.6rem',
+                  transition: 'background 0.2s',
+                }}
+              >
+                {generating ? (
+                  <><Spinner color="#fff" /> Building your presentation…</>
+                ) : (
+                  <>▶ Generate Presentation</>
+                )}
+              </button>
+            )}
+          </div>
+        )}
       </main>
+
+      <footer style={{ textAlign: 'center', padding: '2rem', color: '#9ca3af', fontSize: '0.8rem' }}>
+        Fair Price PPT Builder · Powered by Perigee Field Goose
+      </footer>
     </div>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────────
+
+const card: React.CSSProperties = {
+  background: '#fff',
+  borderRadius: 12,
+  padding: '1.5rem',
+  marginBottom: '1.25rem',
+  boxShadow: '0 1px 4px rgba(0,0,0,0.07)',
+  border: '1px solid #e2e2e2',
+};
+
+function StepLabel({ n, label }: { n: number; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+      <span style={{
+        background: '#76bd22', color: '#fff', borderRadius: '50%',
+        width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '0.8rem', fontWeight: 700, flexShrink: 0,
+      }}>{n}</span>
+      <span style={{ fontWeight: 700, color: '#242424' }}>{label}</span>
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: number }) {
+  return (
+    <div style={{ background: '#F6F6F6', borderRadius: 8, padding: '0.75rem', textAlign: 'center', border: '1px solid #e2e2e2' }}>
+      <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#76bd22' }}>{value}</div>
+      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.2rem' }}>{label}</div>
+    </div>
+  );
+}
+
+function Spinner({ color }: { color: string }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" style={{ animation: 'spin 0.8s linear infinite', display: 'inline-block' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <circle cx="9" cy="9" r="7" fill="none" stroke={color} strokeWidth="2.5" strokeDasharray="30 12" />
+    </svg>
   );
 }
