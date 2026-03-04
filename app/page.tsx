@@ -277,8 +277,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Proxy config (shown when images are present) ── */}
-        {preview && preview.totalImages > 0 && (
+        {/* ── Proxy config (hosted mode only, when images are present) ── */}
+        {preview && preview.totalImages > 0 && !isLocal && (
           <div style={{ ...card, borderColor: proxyUrl ? '#76bd22' : '#f59e0b', background: proxyUrl ? '#fff' : '#fffbeb' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
