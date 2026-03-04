@@ -37,6 +37,10 @@ export default function Home() {
     setProxyOpen(false);
   };
 
+  // ── Mode detection ───────────────────────────────────────────────────────
+  const isLocal = typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
   // ── File / PPT state ─────────────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -81,51 +85,67 @@ export default function Home() {
     if (f) handleFile(f);
   }, [handleFile]);
 
-  // ── Generate (client-side) ──────────────────────────────────────────────────
+  // ── Generate ─────────────────────────────────────────────────────────────
   const handleGenerate = async () => {
-    if (!preview) return;
+    if (!preview || !file) return;
     setGenerating(true);
     setError(null);
     setDone(null);
     setImgProgress(null);
     setBuildingPpt(false);
     try {
-      const { buildPptxBrowser, setProxyBase } = await import('@/lib/ppt-builder-browser');
-      if (proxyUrl) setProxyBase(proxyUrl);
+      if (isLocal) {
+        // ── Local mode: server-side generation with full image embedding ──────
+        // Server runs on SA IP so Perigee image fetch works natively.
+        setBuildingPpt(true);
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('/api/generate', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Generation failed');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'FairPrice_VisualMerch.pptx';
+        a.click();
+        URL.revokeObjectURL(url);
+        setDone({ imagesEmbedded: preview.totalImages, imagesLinked: 0, imagesTotal: preview.totalImages });
+      } else {
+        // ── Hosted mode: client-side generation, images linked not embedded ───
+        const { buildPptxBrowser, setProxyBase } = await import('@/lib/ppt-builder-browser');
+        if (proxyUrl) setProxyBase(proxyUrl);
 
-      const data: ParsedDataJSON = {
-        rows: preview.rows,
-        uniqueUsers: preview.uniqueUsers,
-        uniqueStores: preview.uniqueStores,
-        uniqueDays: preview.uniqueDays,
-        dateRange: preview.dateRange,
-        totalRows: preview.totalRows,
-      };
+        const data: ParsedDataJSON = {
+          rows: preview.rows,
+          uniqueUsers: preview.uniqueUsers,
+          uniqueStores: preview.uniqueStores,
+          uniqueDays: preview.uniqueDays,
+          dateRange: preview.dateRange,
+          totalRows: preview.totalRows,
+        };
 
-      const result = await buildPptxBrowser(
-        data,
-        preview.userSummaries,
-        (loaded, total) => {
-          if (loaded === total && total > 0) {
-            setBuildingPpt(true);
-          }
-          setImgProgress({ loaded, total });
-        },
-      );
+        const result = await buildPptxBrowser(
+          data,
+          preview.userSummaries,
+          (loaded, total) => {
+            if (loaded === total && total > 0) setBuildingPpt(true);
+            setImgProgress({ loaded, total });
+          },
+        );
 
-      setBuildingPpt(false);
-
-      const url = URL.createObjectURL(result.blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'FairPrice_VisualMerch.pptx';
-      a.click();
-      URL.revokeObjectURL(url);
-      setDone({
-        imagesEmbedded: result.imagesEmbedded,
-        imagesLinked: result.imagesLinked,
-        imagesTotal: result.imagesTotal,
-      });
+        setBuildingPpt(false);
+        const url = URL.createObjectURL(result.blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'FairPrice_VisualMerch.pptx';
+        a.click();
+        URL.revokeObjectURL(url);
+        setDone({
+          imagesEmbedded: result.imagesEmbedded,
+          imagesLinked: result.imagesLinked,
+          imagesTotal: result.imagesTotal,
+        });
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate presentation');
     } finally {
@@ -145,7 +165,7 @@ export default function Home() {
   };
 
   const progressLabel = () => {
-    if (buildingPpt) return 'Building presentation…';
+    if (isLocal || buildingPpt) return 'Building presentation…';
     if (imgProgress) {
       const { loaded, total } = imgProgress;
       if (total === 0) return 'Building presentation…';
@@ -368,10 +388,17 @@ export default function Home() {
             ) : (
               <>
                 {!generating && (
-                  <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-                    Images are fetched directly from Perigee in your browser, then the presentation is built locally.
-                    {preview.totalImages > 0 && ` Fetching ${preview.totalImages} images — this may take a moment.`}
-                  </p>
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    {isLocal ? (
+                      <div style={{ background: '#f0fce4', border: '1px solid #76bd22', borderRadius: 8, padding: '0.6rem 1rem', fontSize: '0.875rem', color: '#3d7a0a' }}>
+                        <strong>Local mode</strong> — running on your machine. All {preview.totalImages} images will be fully embedded.
+                      </div>
+                    ) : (
+                      <div style={{ background: '#fef9ec', border: '1px solid #f59e0b', borderRadius: 8, padding: '0.6rem 1rem', fontSize: '0.875rem', color: '#92400e' }}>
+                        <strong>Hosted mode</strong> — images will be linked (click to view in browser). Run locally with <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>npm run dev</code> to embed images fully.
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {generating && imgProgress && (
