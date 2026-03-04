@@ -106,10 +106,11 @@ function compressViaCanvas(b64: string, mime: string): Promise<string> {
 }
 
 async function fetchImageCompressed(url: string): Promise<{ b64: string; mime: string } | null> {
+  // Route through same-origin proxy to avoid CORS restriction on Perigee URLs.
+  // The edge function runs in a non-US region so it won't be IP-blocked.
+  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
   try {
-    const res = await fetch(url, {
-      headers: { Accept: 'image/*,*/*;q=0.8' },
-    });
+    const res = await fetch(proxyUrl);
     if (!res.ok) return null;
     const blob = await res.blob();
     const mime = blob.type || 'image/jpeg';
