@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import type { ParsedDataJSON, SurveyRowJSON } from '@/lib/ppt-builder-browser';
 import type { UserSummary } from '@/types/survey';
+
+const PROXY_KEY = 'fp_cf_proxy_url';
 
 interface PreviewStats {
   totalRows: number;
@@ -17,6 +19,25 @@ interface PreviewStats {
 }
 
 export default function Home() {
+  // ── Proxy config ────────────────────────────────────────────────────────────
+  const [proxyUrl, setProxyUrl] = useState('');
+  const [proxyInput, setProxyInput] = useState('');
+  const [proxyOpen, setProxyOpen] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(PROXY_KEY) || '';
+    setProxyUrl(saved);
+    setProxyInput(saved);
+  }, []);
+
+  const saveProxy = () => {
+    const trimmed = proxyInput.trim();
+    localStorage.setItem(PROXY_KEY, trimmed);
+    setProxyUrl(trimmed);
+    setProxyOpen(false);
+  };
+
+  // ── File / PPT state ─────────────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -69,7 +90,8 @@ export default function Home() {
     setImgProgress(null);
     setBuildingPpt(false);
     try {
-      const { buildPptxBrowser } = await import('@/lib/ppt-builder-browser');
+      const { buildPptxBrowser, setProxyBase } = await import('@/lib/ppt-builder-browser');
+      if (proxyUrl) setProxyBase(proxyUrl);
 
       const data: ParsedDataJSON = {
         rows: preview.rows,
@@ -231,6 +253,84 @@ export default function Home() {
           </div>
         )}
 
+        {/* ── Proxy config (shown when images are present) ── */}
+        {preview && preview.totalImages > 0 && (
+          <div style={{ ...card, borderColor: proxyUrl ? '#76bd22' : '#f59e0b', background: proxyUrl ? '#fff' : '#fffbeb' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1rem' }}>{proxyUrl ? '✅' : '⚠️'}</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#242424', fontSize: '0.9rem' }}>
+                    {proxyUrl ? 'Image proxy configured' : 'Image proxy required'}
+                  </div>
+                  <div style={{ color: '#6b7280', fontSize: '0.78rem', marginTop: '0.1rem' }}>
+                    {proxyUrl
+                      ? proxyUrl
+                      : `${preview.totalImages} images need a Cloudflare Worker proxy to embed correctly.`}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setProxyOpen(o => !o)}
+                style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '0.3rem 0.75rem', cursor: 'pointer', color: '#6b7280', fontSize: '0.8rem', flexShrink: 0 }}
+              >
+                {proxyOpen ? 'Cancel' : proxyUrl ? 'Change' : 'Set up'}
+              </button>
+            </div>
+
+            {proxyOpen && (
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #e5e7eb' }}>
+                <p style={{ fontSize: '0.82rem', color: '#374151', marginBottom: '0.75rem', lineHeight: 1.5 }}>
+                  <strong>One-time setup (5 min):</strong> Create a free{' '}
+                  <a href="https://workers.cloudflare.com" target="_blank" rel="noreferrer" style={{ color: '#76bd22' }}>Cloudflare Workers</a>{' '}
+                  account → <em>Workers &amp; Pages → Create Worker</em> → paste the script below → Deploy.
+                  Copy the <code style={{ background: '#f3f4f6', padding: '0 4px', borderRadius: 3 }}>workers.dev</code> URL and paste it here.
+                </p>
+                <pre style={{
+                  background: '#1e1e1e', color: '#d4d4d4', borderRadius: 8, padding: '0.75rem 1rem',
+                  fontSize: '0.72rem', overflowX: 'auto', marginBottom: '0.75rem', lineHeight: 1.6,
+                }}>
+{`export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const target = url.searchParams.get('url');
+    if (!target?.startsWith('https://live.perigeeportal.co.za/'))
+      return new Response('Bad request', { status: 400 });
+    const res = await fetch(target, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://live.perigeeportal.co.za/' }
+    });
+    const headers = new Headers(res.headers);
+    headers.set('Access-Control-Allow-Origin', '*');
+    return new Response(res.body, { status: res.status, headers });
+  }
+};`}
+                </pre>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="url"
+                    placeholder="https://perigee-proxy.yourname.workers.dev"
+                    value={proxyInput}
+                    onChange={e => setProxyInput(e.target.value)}
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    onClick={saveProxy}
+                    disabled={!proxyInput.trim()}
+                    style={{
+                      background: proxyInput.trim() ? '#76bd22' : '#a8d97b',
+                      color: '#fff', border: 'none', borderRadius: 8,
+                      padding: '0 1.25rem', cursor: proxyInput.trim() ? 'pointer' : 'not-allowed',
+                      fontWeight: 700, fontSize: '0.9rem', flexShrink: 0,
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Step 3: Generate ── */}
         {preview && (
           <div style={card}>
@@ -316,6 +416,11 @@ export default function Home() {
 const card: React.CSSProperties = {
   background: '#fff', borderRadius: 12, padding: '1.5rem', marginBottom: '1.25rem',
   boxShadow: '0 1px 4px rgba(0,0,0,0.07)', border: '1px solid #e2e2e2',
+};
+
+const inputStyle: React.CSSProperties = {
+  border: '1.5px solid #d1d5db', borderRadius: 8, padding: '0.65rem 0.875rem',
+  fontSize: '0.925rem', color: '#242424', outline: 'none', width: '100%',
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────

@@ -61,6 +61,13 @@ export interface ParsedDataJSON {
 
 export type ProgressCallback = (loaded: number, total: number) => void;
 
+// Proxy base URL — set to a Cloudflare Worker URL to bypass Perigee CORS.
+// Falls back to the same-origin Vercel route (which is IP-blocked by Perigee).
+let _proxyBase = '/api/proxy-image';
+export function setProxyBase(url: string) {
+  _proxyBase = url.replace(/\/$/, '');
+}
+
 // ─── Image helpers ────────────────────────────────────────────────────────────
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -106,9 +113,7 @@ function compressViaCanvas(b64: string, mime: string): Promise<string> {
 }
 
 async function fetchImageCompressed(url: string): Promise<{ b64: string; mime: string } | null> {
-  // Route through same-origin proxy to avoid CORS restriction on Perigee URLs.
-  // The edge function runs in a non-US region so it won't be IP-blocked.
-  const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+  const proxyUrl = `${_proxyBase}?url=${encodeURIComponent(url)}`;
   try {
     const res = await fetch(proxyUrl);
     if (!res.ok) return null;
