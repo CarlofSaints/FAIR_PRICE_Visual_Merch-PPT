@@ -2,6 +2,7 @@ import PptxGenJS from 'pptxgenjs';
 import type { ParsedData, SurveyRow, UserSummary } from '@/types/survey';
 import path from 'path';
 import fs from 'fs';
+import sharp from 'sharp';
 
 // ─── Brand tokens ────────────────────────────────────────────────────────────
 const GREEN = '76bd22';
@@ -284,7 +285,7 @@ function addThankYouSlide(pptx: PptxGenJS) {
 }
 
 // ─── Image pre-fetcher ───────────────────────────────────────────────────────
-async function fetchImages(rows: SurveyRow[]): Promise<Map<string, { b64: string; mime: string }>> {
+async function fetchImages(rows: SurveyRow[], perigeeCookie: string): Promise<Map<string, { b64: string; mime: string }>> {
   const allUrls = new Set<string>();
   for (const row of rows) {
     for (const img of row.imageEntries) {
@@ -309,13 +310,19 @@ async function fetchImages(rows: SurveyRow[]): Promise<Map<string, { b64: string
             'Accept': 'image/jpeg,image/png,image/webp,image/*,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': 'https://live.perigeeportal.co.za/',
+            'Cookie': perigeeCookie,
           },
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const contentType = res.headers.get('content-type') || 'image/jpeg';
-        const mime = contentType.split(';')[0].trim() || 'image/jpeg';
-        const buf = await res.arrayBuffer();
-        cache.set(url, { b64: Buffer.from(buf).toString('base64'), mime });
+        const rawBuf = Buffer.from(await res.arrayBuffer());
+
+        // Compress: resize to max 1400px wide, JPEG 82% quality
+        const compressed = await sharp(rawBuf)
+          .resize({ width: 1400, height: 1400, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 82, progressive: true })
+          .toBuffer();
+
+        cache.set(url, { b64: compressed.toString('base64'), mime: 'image/jpeg' });
       } finally {
         clearTimeout(timer);
       }
@@ -335,13 +342,13 @@ async function fetchImages(rows: SurveyRow[]): Promise<Map<string, { b64: string
 }
 
 // ─── Main export ─────────────────────────────────────────────────────────────
-export async function buildPptx(data: ParsedData, summaries: UserSummary[]): Promise<Buffer> {
+export async function buildPptx(data: ParsedData, summaries: UserSummary[], perigeeCookie: string): Promise<Buffer> {
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE'; // 10" × 5.625"
   pptx.author = 'Perigee Field Goose';
   pptx.subject = 'Fair Price Visual Merch Report';
 
-  const imageCache = await fetchImages(data.rows);
+  const imageCache = await fetchImages(data.rows, perigeeCookie);
 
   addTitleSlide(pptx, data);
   addSummarySlide(pptx, data, summaries);

@@ -10,11 +10,17 @@ export async function POST(req: NextRequest) {
     const file = form.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
 
+    // Read the Perigee session cookie stored after login
+    const perigeeCookie = req.cookies.get('perigee_session')?.value ?? null;
+    if (!perigeeCookie) {
+      return NextResponse.json({ error: 'Not logged in to Perigee. Please log in first.' }, { status: 401 });
+    }
+
     const buffer = await file.arrayBuffer();
     const data = parseExcel(buffer);
     const summaries = buildUserSummaries(data);
 
-    const pptxBuffer = await buildPptx(data, summaries);
+    const pptxBuffer = await buildPptx(data, summaries, perigeeCookie);
 
     return new NextResponse(new Uint8Array(pptxBuffer), {
       status: 200,
