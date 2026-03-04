@@ -58,6 +58,12 @@ function formatDate(raw: unknown): { formatted: string; date: Date | null } {
     }
   }
   if (typeof raw === 'string') {
+    // Perigee uses DD/MM/YYYY — parse manually to avoid JS treating it as MM/DD/YYYY
+    const dmyMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmyMatch) {
+      const d = new Date(Number(dmyMatch[3]), Number(dmyMatch[2]) - 1, Number(dmyMatch[1]));
+      if (!isNaN(d.getTime())) return { formatted: formatDateObj(d), date: d };
+    }
     const d = new Date(raw);
     if (!isNaN(d.getTime())) return { formatted: formatDateObj(d), date: d };
     return { formatted: raw, date: null };
