@@ -136,12 +136,13 @@ async function fetchImageDiag(url: string): Promise<FetchOutcome> {
 
 export interface BuildResult {
   blob: Blob;
-  imagesLoaded: number;
+  imagesEmbedded: number;  // images fetched + embedded as data
+  imagesLinked: number;    // images not fetched — clickable links in PPT instead
   imagesTotal: number;
-  httpErrors: number;   // proxy reachable but upstream returned non-2xx
-  exceptions: number;  // fetch threw entirely (network error, CORS, bad URL)
-  firstError: string;  // first error message for display
-  proxyUsed: string;   // which proxy base was used
+  httpErrors: number;
+  exceptions: number;
+  firstError: string;
+  proxyUsed: string;
 }
 
 export async function buildPptxBrowser(
@@ -367,13 +368,21 @@ export async function buildPptxBrowser(
           sizing: { type: 'contain', w: IMG_W, h: IMG_H },
         });
       } else {
+        // Clickable link — opens image in browser when clicked in PowerPoint
         imgSlide.addShape('rect', {
           x: IMG_X, y: IMG_TOP, w: IMG_W, h: IMG_H,
-          fill: { color: LIGHT_GRAY }, line: { color: 'CCCCCC' },
+          fill: { color: 'EDF7E0' },
+          line: { color: GREEN, pt: 1.5 },
+          hyperlink: { url: img.imageUrl, tooltip: 'Click to open image in Perigee' },
         });
-        imgSlide.addText('Image unavailable', {
-          x: IMG_X, y: IMG_TOP + IMG_H / 2 - 0.2, w: IMG_W, h: 0.4,
-          fontSize: 11, color: '999999', fontFace: 'Calibri', align: 'center',
+        imgSlide.addText('Click to view image  ↗', {
+          x: IMG_X, y: IMG_TOP + IMG_H / 2 - 0.35, w: IMG_W, h: 0.55,
+          fontSize: 14, bold: true, color: '3d7a0a', fontFace: 'Calibri', align: 'center',
+          hyperlink: { url: img.imageUrl },
+        });
+        imgSlide.addText('(opens in browser)', {
+          x: IMG_X, y: IMG_TOP + IMG_H / 2 + 0.25, w: IMG_W, h: 0.35,
+          fontSize: 10, color: '6b9e30', fontFace: 'Calibri', align: 'center', italic: true,
         });
       }
 
@@ -414,7 +423,8 @@ export async function buildPptxBrowser(
   const result = await pptx.write({ outputType: 'blob' });
   return {
     blob: result as Blob,
-    imagesLoaded: imageCache.size,
+    imagesEmbedded: imageCache.size,
+    imagesLinked: urlList.length - imageCache.size,
     imagesTotal: urlList.length,
     httpErrors,
     exceptions,

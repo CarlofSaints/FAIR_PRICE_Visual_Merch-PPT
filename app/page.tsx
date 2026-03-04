@@ -45,7 +45,7 @@ export default function Home() {
   const [generating, setGenerating] = useState(false);
   const [imgProgress, setImgProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [buildingPpt, setBuildingPpt] = useState(false);
-  const [done, setDone] = useState<{ imagesLoaded: number; imagesTotal: number; httpErrors: number; exceptions: number; firstError: string; proxyUsed: string } | null>(null);
+  const [done, setDone] = useState<{ imagesEmbedded: number; imagesLinked: number; imagesTotal: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -122,12 +122,9 @@ export default function Home() {
       a.click();
       URL.revokeObjectURL(url);
       setDone({
-        imagesLoaded: result.imagesLoaded,
+        imagesEmbedded: result.imagesEmbedded,
+        imagesLinked: result.imagesLinked,
         imagesTotal: result.imagesTotal,
-        httpErrors: result.httpErrors,
-        exceptions: result.exceptions,
-        firstError: result.firstError,
-        proxyUsed: result.proxyUsed,
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate presentation');
@@ -352,19 +349,14 @@ export default function Home() {
                 </div>
                 {done.imagesTotal > 0 && (
                   <div style={{ marginBottom: '1rem', fontSize: '0.82rem' }}>
-                    {done.imagesLoaded === done.imagesTotal ? (
-                      <div style={{ color: '#5e9a18' }}>All {done.imagesTotal} images embedded successfully.</div>
+                    {done.imagesEmbedded === done.imagesTotal ? (
+                      <div style={{ color: '#5e9a18' }}>All {done.imagesTotal} images embedded.</div>
+                    ) : done.imagesEmbedded > 0 ? (
+                      <div style={{ color: '#5e9a18' }}>{done.imagesEmbedded} images embedded, {done.imagesLinked} linked.</div>
                     ) : (
-                      <div>
-                        <div style={{ color: '#b45309', marginBottom: '0.35rem' }}>
-                          {done.imagesLoaded} of {done.imagesTotal} images embedded.
-                        </div>
-                        <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 6, padding: '0.5rem 0.75rem', color: '#92400e', textAlign: 'left', lineHeight: 1.5 }}>
-                          <div><strong>Proxy used:</strong> <code style={{ fontSize: '0.75rem' }}>{done.proxyUsed}</code></div>
-                          {done.httpErrors > 0 && <div><strong>HTTP errors:</strong> {done.httpErrors} (proxy reached Perigee but got blocked — try a different proxy)</div>}
-                          {done.exceptions > 0 && <div><strong>Network errors:</strong> {done.exceptions} (proxy unreachable or CORS error)</div>}
-                          {done.firstError && <div><strong>First error:</strong> {done.firstError}</div>}
-                        </div>
+                      <div style={{ background: '#f0fce4', border: '1px solid #76bd22', borderRadius: 6, padding: '0.5rem 0.75rem', color: '#3d7a0a', textAlign: 'left', lineHeight: 1.6 }}>
+                        <strong>{done.imagesTotal} images linked</strong> — each image slide has a green <em>"Click to view image ↗"</em> box.
+                        Click it in PowerPoint to open the photo in your browser.
                       </div>
                     )}
                   </div>
