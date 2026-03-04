@@ -9,6 +9,7 @@ interface PreviewStats {
   uniqueStores: number;
   uniqueDays: string[];
   dateRange: { from: string; to: string };
+  totalImages: number;
 }
 
 export default function Home() {
@@ -198,10 +199,11 @@ export default function Home() {
           <div style={card}>
             <StepLabel n={2} label="Preview" />
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
               <StatCard label="Total Surveys" value={preview.totalRows} />
               <StatCard label="Unique Users" value={preview.uniqueUsers} />
               <StatCard label="Unique Stores" value={preview.uniqueStores} />
+              <StatCard label="Images to Fetch" value={preview.totalImages} />
             </div>
 
             {(preview.dateRange.from || preview.dateRange.to) && (

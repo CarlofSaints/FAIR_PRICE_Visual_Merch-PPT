@@ -12,12 +12,15 @@ export async function POST(req: NextRequest) {
     const buffer = await file.arrayBuffer();
     const data = parseExcel(buffer);
 
+    const totalImages = data.rows.reduce((sum, r) => sum + r.imageEntries.length, 0);
+
     return NextResponse.json({
       totalRows: data.totalRows,
       uniqueUsers: data.uniqueUsers.length,
       uniqueStores: data.uniqueStores.length,
       uniqueDays: data.uniqueDays,
       dateRange: data.dateRange,
+      totalImages,
     });
   } catch (err) {
     console.error('Parse error:', err);

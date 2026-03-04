@@ -5,7 +5,6 @@ import fs from 'fs';
 
 // ─── Brand tokens ────────────────────────────────────────────────────────────
 const GREEN = '76bd22';
-const RED = 'FF4539';
 const DARK = '242424';
 const WHITE = 'FFFFFF';
 const LIGHT_GRAY = 'F6F6F6';
@@ -35,7 +34,7 @@ function logoBase64(filename: string): string | null {
 }
 
 function addGreenBar(slide: PptxGenJS.Slide, title: string, subtitle?: string, dateStr?: string) {
-  slide.addShape('rect', { x: 0, y: BAR_Y, w: W, h: BAR_H, fill: { color: GREEN }, line: { color: GREEN } });
+  slide.addShape('rect', { x: 0, y: BAR_Y, w: W, h: BAR_H, fill: { color: GREEN }, line: { type: 'none' } });
 
   slide.addText(title, {
     x: 0.25, y: 0.07, w: dateStr ? 7 : 9.5, h: 0.5,
@@ -57,23 +56,10 @@ function addGreenBar(slide: PptxGenJS.Slide, title: string, subtitle?: string, d
   }
 }
 
-function addLogos(slide: PptxGenJS.Slide, opts: { fpLeft?: boolean; pgRight?: boolean; small?: boolean } = {}) {
-  const fpB64 = logoBase64('fairprice-logo.png');
-  const pgB64 = logoBase64('perigee-logo.png');
-
-  if (opts.fpLeft && fpB64) {
-    slide.addImage({ data: 'image/png;base64,' + fpB64, x: 0.25, y: 0.12, w: 1.4, h: 0.65 });
-  }
-  if (opts.pgRight && pgB64) {
-    const sz = opts.small ? 0.55 : 0.75;
-    slide.addImage({ data: 'image/png;base64,' + pgB64, x: W - sz - 0.2, y: opts.small ? BAR_H - sz - 0.05 : H - sz - 0.15, w: sz, h: sz });
-  }
-}
-
 // ─── Slide 1: Title ──────────────────────────────────────────────────────────
 function addTitleSlide(pptx: PptxGenJS, data: ParsedData) {
   const slide = pptx.addSlide();
-  slide.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: GREEN }, line: { color: GREEN } });
+  slide.background = { color: GREEN };  // full-bleed background
 
   const fpB64 = logoBase64('fairprice-logo.png');
   if (fpB64) {
@@ -103,10 +89,10 @@ function addTitleSlide(pptx: PptxGenJS, data: ParsedData) {
 // ─── Slide 2: Summary ────────────────────────────────────────────────────────
 function addSummarySlide(pptx: PptxGenJS, data: ParsedData, summaries: UserSummary[]) {
   const slide = pptx.addSlide();
-  slide.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF' } });
+  // No need to paint white rect — slides default to white
 
   // Green bar
-  slide.addShape('rect', { x: 0, y: 0, w: W, h: BAR_H, fill: { color: GREEN }, line: { color: GREEN } });
+  slide.addShape('rect', { x: 0, y: 0, w: W, h: BAR_H, fill: { color: GREEN }, line: { type: 'none' } });
   slide.addText('Survey Summary', {
     x: 0.25, y: 0, w: W - 0.5, h: BAR_H,
     fontSize: 18, bold: true, color: WHITE, fontFace: 'Calibri', valign: 'middle',
@@ -123,12 +109,12 @@ function addSummarySlide(pptx: PptxGenJS, data: ParsedData, summaries: UserSumma
     { x: 0.3, y: 1.05, w: W - 0.6, h: 0.4, fontSize: 12, color: DARK, fontFace: 'Calibri', bold: true }
   );
 
-  // Table header
+  // Table
   const days = data.uniqueDays;
   const colNames = ['Name', 'Unique Stores', 'Total Surveys', ...days];
   const colW = [2.2, 1.4, 1.4, ...days.map(() => Math.max(0.9, (W - 5.0) / Math.max(days.length, 1)))];
 
-  const headerRow = colNames.map((n, i) => ({
+  const headerRow = colNames.map(n => ({
     text: n,
     options: { bold: true, color: WHITE, fill: GREEN, fontSize: 10, align: 'center' as const, fontFace: 'Calibri' },
   }));
@@ -152,16 +138,15 @@ function addSummarySlide(pptx: PptxGenJS, data: ParsedData, summaries: UserSumma
 }
 
 // ─── Store slides ─────────────────────────────────────────────────────────────
-async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<string, string>) {
-  // ── Summary slide ───────────────────────────────────────────────────────────
+async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<string, { b64: string; mime: string }>) {
+  // ── Q&A Summary slide(s) ────────────────────────────────────────────────────
   const slide = pptx.addSlide();
-  slide.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF' } });
   addGreenBar(slide, row.store, row.fullName, row.date);
 
   const BODY_TOP = BAR_H + 0.15;
-  const BODY_H = H - BODY_TOP - 0.1;
+  const LINE_H = 0.28;   // increased for 10pt text
+  const SEC_H = 0.28;
 
-  // Collect non-empty sections
   const activeSections = row.sections.filter(s => s.qaPairs.length > 0);
 
   if (activeSections.length === 0) {
@@ -170,7 +155,6 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
       fontSize: 11, color: '888888', fontFace: 'Calibri', italic: true,
     });
   } else {
-    // Two-column layout for sections
     const allPairs: Array<{ section: string; q: string; a: string }> = [];
     for (const sec of activeSections) {
       for (const qa of sec.qaPairs) {
@@ -178,16 +162,15 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
       }
     }
 
-    // Split into chunks of ~22 pairs per slide
-    const CHUNK = 22;
+    // ~18 pairs per chunk fits comfortably at 10pt with SEC_H overhead
+    const CHUNK = 18;
     const chunks: typeof allPairs[] = [];
     for (let i = 0; i < allPairs.length; i += CHUNK) chunks.push(allPairs.slice(i, i + CHUNK));
 
     for (let ci = 0; ci < chunks.length; ci++) {
       const targetSlide = ci === 0 ? slide : (() => {
         const s2 = pptx.addSlide();
-        s2.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF' } });
-        addGreenBar(s2, row.store, row.fullName + (ci > 0 ? ' (cont.)' : ''), row.date);
+        addGreenBar(s2, row.store, row.fullName + ' (cont.)', row.date);
         return s2;
       })();
 
@@ -203,18 +186,17 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
           if (p.section !== lastSection) {
             lastSection = p.section;
             targetSlide.addText(p.section.toUpperCase(), {
-              x: xStart, y, w: colWidth, h: 0.22,
-              fontSize: 8, bold: true, color: GREEN, fontFace: 'Calibri',
+              x: xStart, y, w: colWidth, h: SEC_H,
+              fontSize: 10, bold: true, color: GREEN, fontFace: 'Calibri',
             });
-            y += 0.22;
+            y += SEC_H;
           }
-          const qText = p.q.length > 55 ? p.q.slice(0, 52) + '…' : p.q;
-          const lineH = 0.22;
+          const qText = p.q.length > 60 ? p.q.slice(0, 57) + '…' : p.q;
           targetSlide.addText([
-            { text: qText + '  ', options: { color: '555555', fontSize: 8 } },
-            { text: p.a, options: { color: DARK, bold: true, fontSize: 8 } },
-          ], { x: xStart, y, w: colWidth, h: lineH, fontFace: 'Calibri', valign: 'top' });
-          y += lineH;
+            { text: qText + '  ', options: { color: '555555', fontSize: 10 } },
+            { text: p.a, options: { color: DARK, bold: true, fontSize: 10 } },
+          ], { x: xStart, y, w: colWidth, h: LINE_H, fontFace: 'Calibri', valign: 'top' });
+          y += LINE_H;
           if (y > H - 0.2) break;
         }
       };
@@ -226,25 +208,24 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
 
   // ── Image slides ────────────────────────────────────────────────────────────
   for (const img of row.imageEntries) {
-    const imgB64 = imageCache.get(img.imageUrl);
+    const cached = imageCache.get(img.imageUrl);
     const imgSlide = pptx.addSlide();
-    imgSlide.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: 'FFFFFF' }, line: { color: 'FFFFFF' } });
     addGreenBar(imgSlide, row.store, row.fullName, row.date);
 
     // Section label
     imgSlide.addText(img.sectionName.toUpperCase(), {
-      x: 0.25, y: BAR_H + 0.1, w: 4, h: 0.25,
-      fontSize: 8, bold: true, color: GREEN, fontFace: 'Calibri',
+      x: 0.25, y: BAR_H + 0.1, w: 4, h: 0.28,
+      fontSize: 10, bold: true, color: GREEN, fontFace: 'Calibri',
     });
 
-    const IMG_TOP = BAR_H + 0.4;
-    const IMG_H = 3.2;
+    const IMG_TOP = BAR_H + 0.45;
+    const IMG_H = 3.1;
     const IMG_W = 5.5;
     const IMG_X = (W - IMG_W) / 2;
 
-    if (imgB64) {
+    if (cached) {
       imgSlide.addImage({
-        data: 'image/jpeg;base64,' + imgB64,
+        data: `${cached.mime};base64,${cached.b64}`,
         x: IMG_X, y: IMG_TOP, w: IMG_W, h: IMG_H,
         sizing: { type: 'contain', w: IMG_W, h: IMG_H },
       });
@@ -262,20 +243,20 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
     const captionTop = IMG_TOP + IMG_H + 0.1;
     if (img.precedingQuestion) {
       imgSlide.addText(`Q: ${img.precedingQuestion}`, {
-        x: 0.25, y: captionTop, w: W - 0.5, h: 0.25,
-        fontSize: 9, color: '555555', fontFace: 'Calibri', italic: true,
+        x: 0.25, y: captionTop, w: W - 0.5, h: 0.27,
+        fontSize: 10, color: '555555', fontFace: 'Calibri', italic: true,
       });
       if (img.precedingAnswer) {
         imgSlide.addText(`A: ${img.precedingAnswer}`, {
-          x: 0.25, y: captionTop + 0.24, w: W - 0.5, h: 0.25,
-          fontSize: 9, bold: true, color: DARK, fontFace: 'Calibri',
+          x: 0.25, y: captionTop + 0.27, w: W - 0.5, h: 0.27,
+          fontSize: 10, bold: true, color: DARK, fontFace: 'Calibri',
         });
       }
     }
     if (img.imageHeader) {
       imgSlide.addText(img.imageHeader, {
-        x: 0.25, y: captionTop + 0.5, w: W - 0.5, h: 0.22,
-        fontSize: 8, color: '888888', fontFace: 'Calibri', italic: true,
+        x: 0.25, y: captionTop + 0.56, w: W - 0.5, h: 0.25,
+        fontSize: 9, color: '888888', fontFace: 'Calibri', italic: true,
       });
     }
   }
@@ -284,7 +265,7 @@ async function addStoreSlides(pptx: PptxGenJS, row: SurveyRow, imageCache: Map<s
 // ─── Final slide ─────────────────────────────────────────────────────────────
 function addThankYouSlide(pptx: PptxGenJS) {
   const slide = pptx.addSlide();
-  slide.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: GREEN }, line: { color: GREEN } });
+  slide.background = { color: GREEN };  // full-bleed background
 
   slide.addText('Thank You', {
     x: 0.5, y: 1.5, w: W - 1, h: 1.5,
@@ -303,7 +284,7 @@ function addThankYouSlide(pptx: PptxGenJS) {
 }
 
 // ─── Image pre-fetcher ───────────────────────────────────────────────────────
-async function fetchImages(rows: SurveyRow[]): Promise<Map<string, string>> {
+async function fetchImages(rows: SurveyRow[]): Promise<Map<string, { b64: string; mime: string }>> {
   const allUrls = new Set<string>();
   for (const row of rows) {
     for (const img of row.imageEntries) {
@@ -311,13 +292,33 @@ async function fetchImages(rows: SurveyRow[]): Promise<Map<string, string>> {
     }
   }
 
-  const cache = new Map<string, string>();
+  const cache = new Map<string, { b64: string; mime: string }>();
+  const urlList = [...allUrls];
+
+  console.log(`Fetching ${urlList.length} unique images…`);
+
   const results = await Promise.allSettled(
-    [...allUrls].map(async url => {
-      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buf = await res.arrayBuffer();
-      cache.set(url, Buffer.from(buf).toString('base64'));
+    urlList.map(async url => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      try {
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'image/jpeg,image/png,image/webp,image/*,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://live.perigeeportal.co.za/',
+          },
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const contentType = res.headers.get('content-type') || 'image/jpeg';
+        const mime = contentType.split(';')[0].trim() || 'image/jpeg';
+        const buf = await res.arrayBuffer();
+        cache.set(url, { b64: Buffer.from(buf).toString('base64'), mime });
+      } finally {
+        clearTimeout(timer);
+      }
     })
   );
 
@@ -325,10 +326,10 @@ async function fetchImages(rows: SurveyRow[]): Promise<Map<string, string>> {
   results.forEach((r, i) => {
     if (r.status === 'rejected') {
       failed++;
-      console.warn('Image fetch failed:', [...allUrls][i], r.reason?.message);
+      console.error(`Image failed [${i}]: ${urlList[i]} — ${r.reason?.message ?? r.reason}`);
     }
   });
-  if (failed > 0) console.warn(`${failed}/${allUrls.size} images failed to load`);
+  console.log(`Images loaded: ${urlList.length - failed}/${urlList.length}`);
 
   return cache;
 }
@@ -340,7 +341,6 @@ export async function buildPptx(data: ParsedData, summaries: UserSummary[]): Pro
   pptx.author = 'Perigee Field Goose';
   pptx.subject = 'Fair Price Visual Merch Report';
 
-  // Pre-fetch all images
   const imageCache = await fetchImages(data.rows);
 
   addTitleSlide(pptx, data);
