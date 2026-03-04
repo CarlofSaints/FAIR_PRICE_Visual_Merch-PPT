@@ -1,82 +1,34 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import Image from 'next/image';
+import type { ParsedDataJSON, SurveyRowJSON } from '@/lib/ppt-builder-browser';
+import type { UserSummary } from '@/types/survey';
 
 interface PreviewStats {
   totalRows: number;
-  uniqueUsers: number;
-  uniqueStores: number;
+  uniqueUsers: string[];
+  uniqueStores: string[];
   uniqueDays: string[];
   dateRange: { from: string; to: string };
   totalImages: number;
+  rows: SurveyRowJSON[];
+  userSummaries: UserSummary[];
 }
 
 export default function Home() {
-  // ── Perigee auth state ────────────────────────────────────────────────────
-  const [loginChecked, setLoginChecked] = useState(false);
-  const [loggedInAs, setLoggedInAs] = useState<string | null>(null);
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-
-  // ── File / PPT state ──────────────────────────────────────────────────────
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [preview, setPreview] = useState<PreviewStats | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [imgProgress, setImgProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [buildingPpt, setBuildingPpt] = useState(false);
+  const [done, setDone] = useState<{ imagesLoaded: number; imagesTotal: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check existing session on mount via a lightweight parse test
-  useEffect(() => {
-    fetch('/api/perigee-login', { method: 'GET' })
-      .then(r => {
-        if (r.status === 405) {
-          // Route exists but GET not allowed — not logged in
-          setLoginChecked(true);
-        }
-      })
-      .catch(() => setLoginChecked(true));
-    // We'll detect login state by whether generate succeeds or returns 401
-    setLoginChecked(true);
-  }, []);
-
-  // ── Perigee login ─────────────────────────────────────────────────────────
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoggingIn(true);
-    setLoginError(null);
-    try {
-      const res = await fetch('/api/perigee-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
-      setLoggedInAs(data.displayName || loginUsername);
-      setLoginPassword('');
-    } catch (e: unknown) {
-      setLoginError(e instanceof Error ? e.message : 'Login failed');
-    } finally {
-      setLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await fetch('/api/perigee-login', { method: 'DELETE' });
-    setLoggedInAs(null);
-    setFile(null);
-    setPreview(null);
-    setDone(false);
-    setError(null);
-  };
-
-  // ── File handling ─────────────────────────────────────────────────────────
+  // ── File handling ───────────────────────────────────────────────────────────
   const handleFile = useCallback(async (f: File) => {
     if (!f.name.endsWith('.xlsx') && !f.name.endsWith('.xls')) {
       setError('Please upload an Excel file (.xlsx or .xls)');
@@ -85,7 +37,7 @@ export default function Home() {
     setFile(f);
     setPreview(null);
     setError(null);
-    setDone(false);
+    setDone(null);
     setParsing(true);
     try {
       const fd = new FormData();
@@ -108,33 +60,52 @@ export default function Home() {
     if (f) handleFile(f);
   }, [handleFile]);
 
-  // ── Generate ──────────────────────────────────────────────────────────────
+  // ── Generate (client-side) ──────────────────────────────────────────────────
   const handleGenerate = async () => {
-    if (!file || !preview) return;
+    if (!preview) return;
     setGenerating(true);
     setError(null);
-    setDone(false);
+    setDone(null);
+    setImgProgress(null);
+    setBuildingPpt(false);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/generate', { method: 'POST', body: fd });
-      if (res.status === 401) {
-        setLoggedInAs(null);
-        throw new Error('Session expired — please log in again');
-      }
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Generation failed');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const { buildPptxBrowser } = await import('@/lib/ppt-builder-browser');
+
+      const data: ParsedDataJSON = {
+        rows: preview.rows,
+        uniqueUsers: preview.uniqueUsers,
+        uniqueStores: preview.uniqueStores,
+        uniqueDays: preview.uniqueDays,
+        dateRange: preview.dateRange,
+        totalRows: preview.totalRows,
+      };
+
+      const result = await buildPptxBrowser(
+        data,
+        preview.userSummaries,
+        (loaded, total) => {
+          if (loaded === total && total > 0) {
+            setBuildingPpt(true);
+          }
+          setImgProgress({ loaded, total });
+        },
+      );
+
+      setBuildingPpt(false);
+
+      const url = URL.createObjectURL(result.blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'FairPrice_VisualMerch.pptx';
       a.click();
       URL.revokeObjectURL(url);
-      setDone(true);
+      setDone({ imagesLoaded: result.imagesLoaded, imagesTotal: result.imagesTotal });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate presentation');
     } finally {
       setGenerating(false);
+      setImgProgress(null);
+      setBuildingPpt(false);
     }
   };
 
@@ -142,8 +113,19 @@ export default function Home() {
     setFile(null);
     setPreview(null);
     setError(null);
-    setDone(false);
+    setDone(null);
+    setImgProgress(null);
     if (inputRef.current) inputRef.current.value = '';
+  };
+
+  const progressLabel = () => {
+    if (buildingPpt) return 'Building presentation…';
+    if (imgProgress) {
+      const { loaded, total } = imgProgress;
+      if (total === 0) return 'Building presentation…';
+      return `Fetching images: ${loaded} / ${total}`;
+    }
+    return 'Preparing…';
   };
 
   return (
@@ -160,14 +142,7 @@ export default function Home() {
           <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.4)' }} />
           <span style={{ color: '#fff', fontWeight: 700, fontSize: '1.05rem' }}>PPT Builder</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {loggedInAs && (
-            <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: '0.85rem' }}>
-              Logged in as <strong>{loggedInAs}</strong>
-            </span>
-          )}
-          <Image src="/perigee-logo.png" alt="Perigee" width={44} height={44} style={{ objectFit: 'contain' }} />
-        </div>
+        <Image src="/perigee-logo.png" alt="Perigee" width={44} height={44} style={{ objectFit: 'contain' }} />
       </header>
 
       <main style={{ maxWidth: '680px', margin: '0 auto', padding: '2.5rem 1rem' }}>
@@ -175,7 +150,7 @@ export default function Home() {
           Visual Merch Presentation Generator
         </h1>
         <p style={{ color: '#6b7280', marginBottom: '2rem', fontSize: '0.95rem' }}>
-          Log in with your Perigee account, upload your survey export, and download a branded PowerPoint.
+          Upload your survey export and download a fully branded PowerPoint in one click.
         </p>
 
         {/* Error banner */}
@@ -190,118 +165,52 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Step 1: Perigee Login ── */}
+        {/* ── Step 1: Upload ── */}
         <div style={card}>
-          <StepLabel n={1} label="Login with Perigee" />
-
-          {loggedInAs ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f0fce4', border: '1px solid #76bd22', borderRadius: 8, padding: '0.75rem 1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '1.2rem' }}>✅</span>
-                <div>
-                  <div style={{ fontWeight: 600, color: '#242424', fontSize: '0.9rem' }}>Connected to Perigee</div>
-                  <div style={{ color: '#6b7280', fontSize: '0.8rem' }}>{loggedInAs}</div>
+          <StepLabel n={1} label="Upload Survey Excel" />
+          <div
+            onClick={() => inputRef.current?.click()}
+            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            style={{
+              border: `2px dashed ${dragging || file ? '#76bd22' : '#d1d5db'}`,
+              borderRadius: 10, padding: '2rem', textAlign: 'center', cursor: 'pointer',
+              background: dragging || file ? '#f0fce4' : '#fafafa', transition: 'all 0.2s',
+            }}
+          >
+            {parsing ? (
+              <div style={{ color: '#76bd22', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                <Spinner color="#76bd22" /> Reading file…
+              </div>
+            ) : file ? (
+              <div>
+                <div style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>✅</div>
+                <div style={{ fontWeight: 600, color: '#242424' }}>{file.name}</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.2rem' }}>
+                  {(file.size / 1024).toFixed(0)} KB · Click to change
                 </div>
               </div>
-              <button
-                onClick={handleLogout}
-                style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: 6, padding: '0.3rem 0.75rem', cursor: 'pointer', color: '#6b7280', fontSize: '0.8rem' }}
-              >
-                Log out
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
-                Your Perigee credentials are used to securely download survey images. They are never stored.
-              </p>
-              {loginError && (
-                <div style={{ background: '#FEE2E2', border: '1px solid #FF4539', borderRadius: 6, padding: '0.5rem 0.75rem', color: '#b91c1c', fontSize: '0.875rem' }}>
-                  {loginError}
-                </div>
-              )}
-              <input
-                type="text"
-                placeholder="Perigee email or username"
-                value={loginUsername}
-                onChange={e => setLoginUsername(e.target.value)}
-                required
-                autoComplete="username"
-                style={inputStyle}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                style={inputStyle}
-              />
-              <button
-                type="submit"
-                disabled={loggingIn || !loginUsername || !loginPassword}
-                style={{
-                  background: loggingIn || !loginUsername || !loginPassword ? '#a8d97b' : '#76bd22',
-                  color: '#fff', border: 'none', borderRadius: 8,
-                  padding: '0.75rem 1.5rem', fontSize: '0.95rem', fontWeight: 700,
-                  cursor: loggingIn || !loginUsername || !loginPassword ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
-                }}
-              >
-                {loggingIn ? <><Spinner color="#fff" /> Connecting…</> : 'Login via Perigee'}
-              </button>
-            </form>
-          )}
+            ) : (
+              <div>
+                <div style={{ fontSize: '2.25rem', marginBottom: '0.5rem' }}>📊</div>
+                <div style={{ fontWeight: 600, color: '#242424' }}>Drop your Excel file here</div>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem' }}>or click to browse · .xlsx files only</div>
+              </div>
+            )}
+          </div>
+          <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
         </div>
 
-        {/* ── Step 2: Upload (only shown when logged in) ── */}
-        {loggedInAs && (
+        {/* ── Step 2: Preview ── */}
+        {preview && (
           <div style={card}>
-            <StepLabel n={2} label="Upload Survey Excel" />
-            <div
-              onClick={() => inputRef.current?.click()}
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-              style={{
-                border: `2px dashed ${dragging || file ? '#76bd22' : '#d1d5db'}`,
-                borderRadius: 10, padding: '2rem', textAlign: 'center', cursor: 'pointer',
-                background: dragging || file ? '#f0fce4' : '#fafafa', transition: 'all 0.2s',
-              }}
-            >
-              {parsing ? (
-                <div style={{ color: '#76bd22', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                  <Spinner color="#76bd22" /> Reading file…
-                </div>
-              ) : file ? (
-                <div>
-                  <div style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>✅</div>
-                  <div style={{ fontWeight: 600, color: '#242424' }}>{file.name}</div>
-                  <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.2rem' }}>
-                    {(file.size / 1024).toFixed(0)} KB · Click to change
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: '2.25rem', marginBottom: '0.5rem' }}>📊</div>
-                  <div style={{ fontWeight: 600, color: '#242424' }}>Drop your Excel file here</div>
-                  <div style={{ color: '#6b7280', fontSize: '0.85rem', marginTop: '0.25rem' }}>or click to browse · .xlsx files only</div>
-                </div>
-              )}
-            </div>
-            <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-          </div>
-        )}
-
-        {/* ── Step 3: Preview ── */}
-        {loggedInAs && preview && (
-          <div style={card}>
-            <StepLabel n={3} label="Preview" />
+            <StepLabel n={2} label="Preview" />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
               <StatCard label="Total Surveys" value={preview.totalRows} />
-              <StatCard label="Unique Users" value={preview.uniqueUsers} />
-              <StatCard label="Unique Stores" value={preview.uniqueStores} />
+              <StatCard label="Unique Users" value={preview.uniqueUsers.length} />
+              <StatCard label="Unique Stores" value={preview.uniqueStores.length} />
               <StatCard label="Images to Fetch" value={preview.totalImages} />
             </div>
             {(preview.dateRange.from || preview.dateRange.to) && (
@@ -322,40 +231,74 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Step 4: Generate ── */}
-        {loggedInAs && preview && (
+        {/* ── Step 3: Generate ── */}
+        {preview && (
           <div style={card}>
-            <StepLabel n={4} label="Generate Presentation" />
-            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
-              Fetching {preview.totalImages} survey images from Perigee and building a fully branded PowerPoint.
-              This may take up to a minute for large files.
-            </p>
+            <StepLabel n={3} label="Generate Presentation" />
+
             {done ? (
               <div style={{ background: '#f0fce4', border: '1px solid #76bd22', borderRadius: 8, padding: '1.25rem', textAlign: 'center' }}>
                 <div style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>🎉</div>
                 <div style={{ fontWeight: 700, color: '#242424', marginBottom: '0.35rem' }}>Presentation downloaded!</div>
-                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: '1rem' }}>
+                <div style={{ color: '#6b7280', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
                   Check your Downloads folder for <strong>FairPrice_VisualMerch.pptx</strong>
                 </div>
+                {done.imagesTotal > 0 && (
+                  <div style={{ fontSize: '0.82rem', color: done.imagesLoaded === done.imagesTotal ? '#5e9a18' : '#b45309', marginBottom: '1rem' }}>
+                    {done.imagesLoaded === done.imagesTotal
+                      ? `All ${done.imagesTotal} images embedded successfully.`
+                      : `${done.imagesLoaded} of ${done.imagesTotal} images embedded (${done.imagesTotal - done.imagesLoaded} unavailable).`}
+                  </div>
+                )}
                 <button onClick={reset} style={{ background: 'transparent', border: '1.5px solid #76bd22', color: '#5e9a18', borderRadius: 6, padding: '0.4rem 1rem', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' }}>
                   Build another
                 </button>
               </div>
             ) : (
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                style={{
-                  width: '100%', background: generating ? '#a8d97b' : '#76bd22',
-                  color: '#fff', border: 'none', borderRadius: 8,
-                  padding: '0.9rem 1.5rem', fontSize: '1rem', fontWeight: 700,
-                  cursor: generating ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem',
-                  transition: 'background 0.2s',
-                }}
-              >
-                {generating ? <><Spinner color="#fff" /> Building your presentation…</> : <>▶ Generate Presentation</>}
-              </button>
+              <>
+                {!generating && (
+                  <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.25rem' }}>
+                    Images are fetched directly from Perigee in your browser, then the presentation is built locally.
+                    {preview.totalImages > 0 && ` Fetching ${preview.totalImages} images — this may take a moment.`}
+                  </p>
+                )}
+
+                {generating && imgProgress && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem', fontSize: '0.85rem', color: '#242424' }}>
+                      <span>{progressLabel()}</span>
+                      {imgProgress.total > 0 && !buildingPpt && (
+                        <span style={{ color: '#76bd22', fontWeight: 600 }}>
+                          {imgProgress.loaded} / {imgProgress.total}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', borderRadius: 4, background: '#76bd22', transition: 'width 0.3s',
+                        width: imgProgress.total > 0
+                          ? `${Math.round((imgProgress.loaded / imgProgress.total) * 100)}%`
+                          : buildingPpt ? '100%' : '10%',
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  style={{
+                    width: '100%', background: generating ? '#a8d97b' : '#76bd22',
+                    color: '#fff', border: 'none', borderRadius: 8,
+                    padding: '0.9rem 1.5rem', fontSize: '1rem', fontWeight: 700,
+                    cursor: generating ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  {generating ? <><Spinner color="#fff" /> {progressLabel()}</> : <>▶ Generate Presentation</>}
+                </button>
+              </>
             )}
           </div>
         )}
@@ -368,19 +311,14 @@ export default function Home() {
   );
 }
 
-// ── Shared styles ──────────────────────────────────────────────────────────
+// ── Shared styles ─────────────────────────────────────────────────────────────
 
 const card: React.CSSProperties = {
   background: '#fff', borderRadius: 12, padding: '1.5rem', marginBottom: '1.25rem',
   boxShadow: '0 1px 4px rgba(0,0,0,0.07)', border: '1px solid #e2e2e2',
 };
 
-const inputStyle: React.CSSProperties = {
-  border: '1.5px solid #d1d5db', borderRadius: 8, padding: '0.65rem 0.875rem',
-  fontSize: '0.925rem', color: '#242424', outline: 'none', width: '100%',
-};
-
-// ── Sub-components ─────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function StepLabel({ n, label }: { n: number; label: string }) {
   return (
